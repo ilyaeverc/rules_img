@@ -11,7 +11,9 @@ import (
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bazel-contrib/rules_img/img_tool/pkg/registry"
+	"github.com/bazel-contrib/rules_img/img_tool/pkg/registry/s3store"
 	registryv1 "github.com/google/go-containerregistry/pkg/v1"
 	"google.golang.org/grpc"
 
@@ -46,6 +48,9 @@ func Run(ctx context.Context, args []string) {
 	var casKeepAlive bool
 	var remoteCacheTTL time.Duration
 	var keepAliveScanInterval time.Duration
+	var manifestStore string
+	var manifestS3Bucket string
+	var manifestS3Prefix string
 
 	flagSet := flag.NewFlagSet("registry", flag.ExitOnError)
 	flagSet.Usage = func() {
@@ -57,6 +62,7 @@ func Run(ctx context.Context, args []string) {
 			"registry --blob-store s3 --blob-store reapi",
 			"registry --blob-store reapi --ttl 6h --tag-ttl 168h",
 			"registry --blob-store reapi --cas-keepalive --cas-remote-cache-ttl 24h",
+			"registry --blob-store reapi --manifest-store s3 --manifest-s3-bucket my-bucket --manifest-s3-prefix cas-registry",
 		}
 		fmt.Fprintf(flagSet.Output(), "\nExamples:\n")
 		for _, example := range examples {
@@ -84,6 +90,10 @@ func Run(ctx context.Context, args []string) {
 	flagSet.DurationVar(&remoteCacheTTL, "cas-remote-cache-ttl", 24*time.Hour, "How long the remote cache is believed to keep a blob nobody asks about. Used with --cas-keepalive.")
 	flagSet.DurationVar(&keepAliveScanInterval, "cas-keepalive-scan-interval", time.Hour, "How often --cas-keepalive wakes up to look for blobs due a refresh. Keep it well under half of --cas-remote-cache-ttl.")
 
+	flagSet.StringVar(&manifestStore, "manifest-store", "memory", `Where manifests and tags are kept. "memory" forgets them on exit; "s3" writes each one through to --manifest-s3-bucket and reloads them on start.`)
+	flagSet.StringVar(&manifestS3Bucket, "manifest-s3-bucket", "", `S3 bucket for --manifest-store s3. Uses the --s3-endpoint, --s3-region and --s3-profile settings.`)
+	flagSet.StringVar(&manifestS3Prefix, "manifest-s3-prefix", "", "Key prefix for --manifest-store s3. One registry per prefix: the store assumes it is the only writer.")
+
 	if err := flagSet.Parse(args[1:]); err != nil {
 		fmt.Fprint(os.Stderr, err.Error())
 		flagSet.Usage()
@@ -94,6 +104,16 @@ func Run(ctx context.Context, args []string) {
 	tagTTL := tagTTLFlag.orElse(manifestTTL)
 	if manifestTTL < 0 || tagTTL < 0 {
 		fmt.Fprintln(os.Stderr, "Error: --ttl and --tag-ttl must be non-negative")
+		flagSet.Usage()
+		os.Exit(1)
+	}
+	if manifestStore != "memory" && manifestStore != "s3" {
+		fmt.Fprintf(os.Stderr, "Error: --manifest-store must be \"memory\" or \"s3\", not %q\n", manifestStore)
+		flagSet.Usage()
+		os.Exit(1)
+	}
+	if manifestStore == "s3" && manifestS3Bucket == "" {
+		fmt.Fprintln(os.Stderr, "Error: --manifest-store s3 requires --manifest-s3-bucket")
 		flagSet.Usage()
 		os.Exit(1)
 	}
@@ -230,7 +250,18 @@ func Run(ctx context.Context, args []string) {
 	// The collector decides what the registry may forget. It is also the only
 	// thing that knows which blobs are still reachable, so the keepalive needs
 	// one even when nothing is being evicted.
-	store := registry.NewMemStore()
+	var store registry.Store = registry.NewMemStore()
+	if manifestStore == "s3" {
+		awsConfig, err := awsconfig.LoadDefaultConfig(ctx, s3Opts...)
+		if err != nil {
+			log.Fatalf("Failed to load AWS config for the S3 manifest store: %v", err)
+		}
+		s3Store, err := s3store.Open(ctx, awss3.NewFromConfig(awsConfig), manifestS3Bucket, manifestS3Prefix, s3store.Config{})
+		if err != nil {
+			log.Fatalf("Failed to load the S3 manifest store: %v", err)
+		}
+		store = s3Store
+	}
 	var collector *registry.Collector
 	if manifestTTL > 0 || tagTTL > 0 || casKeepAlive {
 		collector = registry.NewCollector(store, registry.CollectorConfig{

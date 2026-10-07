@@ -1,0 +1,38 @@
+# EverC fork: a static linux/amd64 `registry` binary on a GitHub release, the shape ai-utils
+# fetches bazel-diff in (http_file + sha256). Tag everc-registry-v<N> to publish.
+name: everc registry release
+
+on:
+  push:
+    tags: ['everc-registry-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: img_tool/go.mod
+          cache-dependency-path: img_tool/go.sum
+      - name: Test
+        working-directory: img_tool
+        run: go test ./pkg/registry/... ./cmd/registry
+      - name: Build
+        working-directory: img_tool
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags='-s -w -buildid=' -o ../registry-linux-amd64 ./cmd/registry
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum registry-linux-amd64 > registry-linux-amd64.sha256
+          gh release create "$GITHUB_REF_NAME" registry-linux-amd64 registry-linux-amd64.sha256 \
+            --title "$GITHUB_REF_NAME" \
+            --notes "CAS registry with --manifest-store s3. Built from $GITHUB_SHA with $(go version)."
