@@ -264,6 +264,22 @@ registry --blob-store reapi --reapi-endpoint grpc://your-cas-server:9092 \
   --ttl 6h --cas-keepalive
 ```
 
+### Keeping manifests across restarts
+
+By default the registry holds manifests and tags in memory, so a restart forgets every
+image until it is pushed again. `--manifest-store s3` writes each manifest and tag
+through to S3 before acknowledging the push, and reloads them on start:
+
+```bash
+registry --blob-store reapi --reapi-endpoint grpc://your-cas-server:9092 \
+  --manifest-store s3 --manifest-s3-bucket my-bucket --manifest-s3-prefix cas-registry \
+  --s3-region us-east-1 --ttl 168h --cas-keepalive
+```
+
+Blobs still come from the CAS; S3 holds only manifests (`<prefix>/manifests/<repo>/<alg>/<hex>`)
+and tags (`<prefix>/tags/<repo>/<tag>`). Run one registry per prefix: the store assumes it is
+the only writer. Garbage collection deletes the S3 objects of whatever it collects.
+
 See [Garbage collection](../img_tool/pkg/registry/garbage-collection.md) for every
 flag, what the retention rules actually are, and how to size the keepalive.
 
