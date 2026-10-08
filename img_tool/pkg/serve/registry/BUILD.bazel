@@ -19,7 +19,10 @@ go_library(
 
 go_test(
     name = "registry_test",
-    srcs = ["keepalive_test.go"],
+    srcs = [
+        "blobsizecache_test.go",
+        "keepalive_test.go",
+    ],
     embed = [":registry"],
     deps = [
         "//pkg/cas",

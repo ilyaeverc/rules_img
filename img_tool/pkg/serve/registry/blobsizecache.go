@@ -54,6 +54,40 @@ func (b *BlobSizeCache) Delete(hash registryv1.Hash) {
 	delete(b.cache, hash.String())
 }
 
+func (b *BlobSizeCache) Seed(store registry.Store) int {
+	seeded := 0
+	store.RangeRepos(func(repo string) bool {
+		store.RangeManifests(repo, func(digest registryv1.Hash, m registry.Manifest) bool {
+			b.Set(digest, int64(len(m.Blob)))
+			switch mediaType := types.MediaType(m.ContentType); {
+			case mediaType.IsIndex():
+				if index, err := registryv1.ParseIndexManifest(bytes.NewReader(m.Blob)); err == nil {
+					for _, desc := range index.Manifests {
+						if desc.Size > 0 {
+							b.Set(desc.Digest, desc.Size)
+						}
+					}
+				}
+			case mediaType.IsImage():
+				if manifest, err := registryv1.ParseManifest(bytes.NewReader(m.Blob)); err == nil {
+					for _, layer := range manifest.Layers {
+						if layer.Size > 0 {
+							b.Set(layer.Digest, layer.Size)
+						}
+					}
+					if manifest.Config.Size > 0 {
+						b.Set(manifest.Config.Digest, manifest.Config.Size)
+					}
+				}
+			}
+			seeded++
+			return true
+		})
+		return true
+	})
+	return seeded
+}
+
 type BlobSizeCacheCallback struct {
 	sizeCache *BlobSizeCache
 	handler   Handler
