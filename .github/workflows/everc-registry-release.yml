@@ -1,6 +1,7 @@
 # EverC fork: a static linux/amd64 `registry` binary on a GitHub release, the shape ai-utils
 # fetches bazel-diff in (http_file + sha256). Each push to an everc/* branch publishes
-# everc-registry-<12-char sha>; gh creates the tag, so nothing pushes tags by hand.
+# everc-registry-v0.<run number>.0, semver so ai-utils' Renovate can order releases; the notes
+# carry the commit. gh creates the tag, so nothing pushes tags by hand.
 name: everc registry release
 
 on:
@@ -37,7 +38,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="everc-registry-${GITHUB_SHA::12}"
+          tag="everc-registry-v0.${GITHUB_RUN_NUMBER}.0"
           sha256sum registry-linux-amd64 > registry-linux-amd64.sha256
           gh release create "$tag" registry-linux-amd64 registry-linux-amd64.sha256 \
             --target "$GITHUB_SHA" --title "$tag" \
