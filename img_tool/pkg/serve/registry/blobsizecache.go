@@ -54,6 +54,7 @@ func (b *BlobSizeCache) Delete(hash registryv1.Hash) {
 	delete(b.cache, hash.String())
 }
 
+// Seed refills sizes from manifests already in store, e.g. a persistent one after a restart.
 func (b *BlobSizeCache) Seed(store registry.Store) int {
 	seeded := 0
 	store.RangeRepos(func(repo string) bool {

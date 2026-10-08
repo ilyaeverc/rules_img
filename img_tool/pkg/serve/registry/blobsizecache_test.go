@@ -45,7 +45,10 @@ func TestSeedRestoresBlobSizesOfStoredManifests(t *testing.T) {
 func TestSeedSkipsManifestsItCannotParse(t *testing.T) {
 	store := registry.NewMemStore()
 	broken := []byte("{not json")
-	digest, _, _ := registryv1.SHA256(bytes.NewReader(broken))
+	digest, _, err := registryv1.SHA256(bytes.NewReader(broken))
+	if err != nil {
+		t.Fatal(err)
+	}
 	store.PutManifest("mcp-gateway", digest, registry.Manifest{ContentType: string(types.OCIManifestSchema1), Blob: broken})
 
 	cache := NewBlobSizeCache()
